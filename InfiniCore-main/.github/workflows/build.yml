@@ -1,0 +1,42 @@
+name: Build and test
+on:
+  pull_request:
+  push:
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+
+jobs:
+  build:
+    name: Build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        type: [debug, release]
+    runs-on: ${{ matrix.os }}
+    steps:
+
+    - name: checkout code
+      uses: actions/checkout@v4
+
+    - name: Check Format
+      run: |
+        pip install black
+        python3 scripts/format.py --path src --check
+
+    - name: install xmake
+      uses: xmake-io/github-action-setup-xmake@v1
+      with:
+        xmake-version: latest
+
+    - name: Build & Install
+      run: python scripts/install.py --omp=y
+
+    - name: install python packages
+      run: |
+        pip install numpy
+        pip install torch
+
+    - name: Python Test
+      run: python scripts/python_test.py --cpu
