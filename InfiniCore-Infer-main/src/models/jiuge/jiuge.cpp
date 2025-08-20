@@ -231,9 +231,9 @@ void inferDeviceBatch(const JiugeMeta &meta, DeviceResource &rsrc,
         // [nkvh, dh, total_len]
         auto full_kv = kv_caches[req]->k[idev][0]->slice(0, 0, total_len)->permute({1, 2, 0});
         auto cache_kv = kv_caches[req]->k[idev][0]->slice(0, past_len, seq_len);
-
+        size_t recentWindow = 16;
         if (past_len == 0) {
-            auto k_compressed = k->slice({{0, seq_len - recentWindow, seq_len}});
+            auto k_compressed = k->slice({0, seq_len - recentWindow, seq_len});
             RUN_INFINI(infiniopCreateRearrangeDescriptor(rsrc.handle, &desc_kv_rearranges[req],
                                                          cache_kv->desc(), k_compressed->desc()));
         } else {
