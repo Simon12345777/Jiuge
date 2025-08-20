@@ -237,13 +237,14 @@ void inferDeviceBatch(const JiugeMeta &meta, DeviceResource &rsrc,
 
         if (past_len == 0) {
             auto k_compressed = k->slice({{0, seq_len - recentWindow, recentWindow}});
+            auto cache_kv_compressed = kv_caches[req]->k[idev][0]->slice(0, past_len, recentWindow);
             RUN_INFINI(infiniopCreateRearrangeDescriptor(rsrc.handle, &desc_kv_rearranges[req],
-                                                         cache_kv->desc(), k_compressed->desc()));
+                                                         cache_kv_compressed->desc(), k_compressed->desc()));
         } else {
             RUN_INFINI(infiniopCreateRearrangeDescriptor(rsrc.handle, &desc_kv_rearranges[req],
                                                          cache_kv->desc(), k->desc()));
         }
-
+//miAQw93wAULs
 
         // [nkvh, ngroup, seq_len, dh]
         q->dimSplit(1, {nkvh, ngroup})->permute({1, 2, 0, 3});

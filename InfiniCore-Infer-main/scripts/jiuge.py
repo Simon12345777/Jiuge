@@ -407,7 +407,7 @@ class JiugeForCauslLM:
         load_start_time = time.time()
 
         with open(os.path.join(model_dir_path, "config.json"), "r") as f:
-            config = json.load(f)
+            config = json.load(f)  # 模型超参，最后传到meta
             self.config = config
         eos_token_id = self.config["eos_token_id"]
         self.eos_token_id = (
@@ -504,7 +504,7 @@ class JiugeForCauslLM:
         print(f"Creating model on {ndev} devices...")
         load_start_time = time.time()
         dev_ids = (c_int * ndev)(*[i for i in range(ndev)])
-        self.model_instance = create_jiuge_model(
+        self.model_instance = create_jiuge_model(  # 调用C接口
             byref(self.meta),
             byref(self.weights),
             device,
@@ -617,7 +617,7 @@ def test():
 
     ndev = int(sys.argv[3]) if len(sys.argv) > 3 else 1
     model = JiugeForCauslLM(model_path, device_type, ndev)
-    model.generate("山东最高的山是？", 51)
+    model.generate("在运动学中，物体的位移对于时间的导数就是物体的瞬时速度。导数是函数的局部性质。不是所有的函数都有导数，一个函数也不一定在所有的点上都有导数。若某函数在某一点导数存在，则称其在这一点可导，否则称为不可导。如果函数的自变量和取值都是实数的话，那么函数在某一点的导数就是该函数所代表的曲线在这一点上的切线斜率。请问导数是什么", 20)
     model.destroy_model_instance()
 
 

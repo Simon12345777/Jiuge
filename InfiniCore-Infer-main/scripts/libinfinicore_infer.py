@@ -85,7 +85,7 @@ def __open_library__():
     lib_path = os.path.join(
         os.environ.get("INFINI_ROOT"), "lib", "libinfinicore_infer.so"
     )
-    lib = ctypes.CDLL(lib_path) #  通过 ctypes.CDLL 加载这个共享库，使 Python 能调用其中的 C 函数。
+    lib = ctypes.CDLL(lib_path)  # 通过 ctypes.CDLL 加载这个共享库，使 Python 能调用其中的 C 函数。
     lib.createJiugeModel.restype = POINTER(JiugeModelCSruct)
     lib.createJiugeModel.argtypes = [
         POINTER(JiugeMetaCStruct),  # JiugeMeta const *
