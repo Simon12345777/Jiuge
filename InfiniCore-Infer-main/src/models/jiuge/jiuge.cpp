@@ -123,16 +123,16 @@ void inferDeviceBatch(const JiugeMeta &meta, DeviceResource &rsrc,
     auto ngroup = nh / nkvh;
     // auto dctx = meta.dctx;
     auto dh = meta.dh;
-    auto d = meta.d;
-    auto dt_logits = meta.dt_logits;
+    auto d = meta.d; //hidden size
+    auto dt_logits = meta.dt_logits; //data type
     auto di = meta.di / ndev;
     auto dvoc = meta.dvoc;
     auto stream = rsrc.stream;
     bool has_qkv_bias = rsrc.b_attn_qkv.size() > 0;
 
     // Allocate buffers
-    auto logits_in = Tensor::buffer(dt_logits, {ntok, d}, rsrc.memory_pool);
-    auto logits_out = Tensor::buffer(dt_logits, {ntok, d}, rsrc.memory_pool);
+    auto logits_in = Tensor::buffer(dt_logits, {ntok, d}, rsrc.memory_pool); //hidden_stat
+    auto logits_out = Tensor::buffer(dt_logits, {ntok, d}, rsrc.memory_pool); //hidden_stat (rms)
     auto qkv_buf = Tensor::buffer(dt_logits, {ntok, (nh + nkvh * 2) * dh}, rsrc.memory_pool);
     auto gate_up_buf = Tensor::buffer(dt_logits, {ntok, 2 * di}, rsrc.memory_pool);
     auto o_buf = Tensor::buffer(dt_logits, {ntok, nh * dh}, rsrc.memory_pool);
@@ -162,7 +162,7 @@ void inferDeviceBatch(const JiugeMeta &meta, DeviceResource &rsrc,
         RUN_INFINI(infinirtMemcpyAsync(logits_in->data(i * d),
                                        rsrc.w_in_embd->data(tokens[i] * d),
                                        dsize(dt_logits) * d, INFINIRT_MEMCPY_D2D, stream));
-    }
+    } // ids -> embed hidden
 
     // Prepare operators and workspace
     size_t workspace_size = 0, temp_size = 0;
@@ -226,14 +226,21 @@ void inferDeviceBatch(const JiugeMeta &meta, DeviceResource &rsrc,
         auto o = o_buf->slice({{0, token_offset, seq_len}});
         auto q = qkv_buf->slice({{0, token_offset, seq_len}, {1, 0, nh}});
         auto k = qkv_buf->slice({{0, token_offset, seq_len}, {1, nh, nkvh}});
-        // auto v = qkv_buf->slice({{0, token_offset, seq_len}, {1, nh + nkvh, nkvh}});
+        auto v = qkv_buf->slice({{0, token_offset, seq_len}, {1, nh + nkvh, nkvh}});
         // kv cache tensors can share the same descriptor
         // [nkvh, dh, total_len]
         auto full_kv = kv_caches[req]->k[idev][0]->slice(0, 0, total_len)->permute({1, 2, 0});
         auto cache_kv = kv_caches[req]->k[idev][0]->slice(0, past_len, seq_len);
 
-        RUN_INFINI(infiniopCreateRearrangeDescriptor(rsrc.handle, &desc_kv_rearranges[req],
-                                                     cache_kv->desc(), k->desc()));
+        if (past_len == 0) {
+            auto k_compressed = k->slice({{0, seq_len - recentWindow, seq_len}});
+            RUN_INFINI(infiniopCreateRearrangeDescriptor(rsrc.handle, &desc_kv_rearranges[req],
+                                                         cache_kv->desc(), k_compressed->desc()));
+        } else {
+            RUN_INFINI(infiniopCreateRearrangeDescriptor(rsrc.handle, &desc_kv_rearranges[req],
+                                                         cache_kv->desc(), k->desc()));
+        }
+
 
         // [nkvh, ngroup, seq_len, dh]
         q->dimSplit(1, {nkvh, ngroup})->permute({1, 2, 0, 3});
@@ -250,15 +257,30 @@ void inferDeviceBatch(const JiugeMeta &meta, DeviceResource &rsrc,
         auto qk = TensorDesc::create(dt_logits, {nkvh, ngroup * seq_len, total_len});
         max_qk_size = std::max(max_qk_size, size_t(seq_len * total_len));
         max_seq_len = std::max(max_seq_len, size_t(seq_len));
-        RUN_INFINI(infiniopCreateGemmDescriptor(
-            rsrc.handle, &desc_qk_gemms[req], qk->desc(), q_t->desc(), full_kv->desc()));
+
+        if (past_len == 0) {
+            RUN_INFINI(infiniopCreateGemmDescriptor(
+                    rsrc.handle, &desc_qk_gemms[req], qk->desc(), q_t->desc(), k->desc()));
+        } else {
+            RUN_INFINI(infiniopCreateGemmDescriptor(
+                    rsrc.handle, &desc_qk_gemms[req], qk->desc(), q_t->desc(), full_kv->desc()));
+        }
+
+
         RUN_INFINI(infiniopGetGemmWorkspaceSize(desc_qk_gemms[req], &temp_size));
         workspace_size = std::max(workspace_size, temp_size);
 
         // [nkvh, total_len, dh]
         auto full_v = kv_caches[req]->v[idev][0]->slice(0, 0, total_len)->permute({1, 0, 2});
-        RUN_INFINI(infiniopCreateGemmDescriptor(
-            rsrc.handle, &desc_attn_v_gemms[req], q_t->desc(), qk->desc(), full_v->desc()));
+
+        if (past_len == 0) {
+            RUN_INFINI(infiniopCreateGemmDescriptor(
+                    rsrc.handle, &desc_attn_v_gemms[req], q_t->desc(), qk->desc(), v->desc()));
+        } else {
+            RUN_INFINI(infiniopCreateGemmDescriptor(
+                    rsrc.handle, &desc_attn_v_gemms[req], q_t->desc(), qk->desc(), full_v->desc()));
+        }
+
         RUN_INFINI(infiniopGetGemmWorkspaceSize(desc_attn_v_gemms[req], &temp_size));
         workspace_size = std::max(workspace_size, temp_size);
 
@@ -317,7 +339,7 @@ void inferDeviceBatch(const JiugeMeta &meta, DeviceResource &rsrc,
     RUN_INFINI(infiniopGetRandomSampleWorkspaceSize(desc_sample, &temp_size));
     workspace_size = std::max(workspace_size, temp_size);
     // Allocate workspace
-    std::shared_ptr<Storage> workspace_storage = Storage::createFromPool(workspace_size, rsrc.memory_pool);
+    std::shared_ptr<Storage> workspace_storage = Storage::createFromPool(workspace_size, rsrc.memory_pool); //激活值所需最大的内存空间
     void *workspace = workspace_storage->memory();
 
     // Compute
@@ -354,36 +376,67 @@ void inferDeviceBatch(const JiugeMeta &meta, DeviceResource &rsrc,
             stream));
 
         size_t token_offset = 0;
+        size_t recentWindow = 16;/////streamingLLM
         for (uint32_t req = 0; req < nreq; req++) {
-            auto past_len = req_pos[req];
+            auto past_len = req_pos[req]; //for kv cache
             auto seq_len = req_lens[req];
             auto o = o_buf->slice({{0, token_offset, seq_len}});
             auto q = qkv_buf->slice({{0, token_offset, seq_len}, {1, 0, nh}});
             auto k = qkv_buf->slice({{0, token_offset, seq_len}, {1, nh, nkvh}});
-            auto v = qkv_buf->slice({{0, token_offset, seq_len}, {1, nh + nkvh, nkvh}});
+            auto v = qkv_buf->slice({{0, token_offset, seq_len}, {1, nh + nkvh, nkvh}}); //同一个req的qkv本身也储存在一起，arg2=起始位置，arg3=大小
+            //不同req的qkv存在一起,用token_offset来维护
             // self attention
-            // concat
-            RUN_INFINI(infiniopRearrange(
-                desc_kv_rearranges[req],
-                kv_caches[req]->k[idev][layer]->data(past_len * nkvh * dh),
-                k->data(), stream)); //加进kv cache
-            RUN_INFINI(infiniopRearrange(
-                desc_kv_rearranges[req],
-                kv_caches[req]->v[idev][layer]->data(past_len * nkvh * dh),
-                v->data(), stream));
-            // qk
-            RUN_INFINI(infiniopRearrange(desc_q_rearranges[req], rearrange_q_buf->data(), q->data(), stream));
-            RUN_INFINI(infiniopGemm(
-                desc_qk_gemms[req], workspace, workspace_size,
-                qk_buf->data(), rearrange_q_buf->data(), kv_caches[req]->k[idev][layer]->data(), 1. / sqrt(dh), 0.0, stream));
-            // softmax
-            RUN_INFINI(infiniopCausalSoftmax(
-                desc_qk_softmaxs[req], workspace, workspace_size,
-                qk_buf->data(), qk_buf->data(), stream));
-            // attn val
-            RUN_INFINI(infiniopGemm(
-                desc_attn_v_gemms[req], workspace, workspace_size,
-                attn_val_buf->data(), qk_buf->data(), kv_caches[req]->v[idev][layer]->data(), 1.0, 0.0, stream));
+            if (past_len == 0) { // first prefill phase
+                auto k_compressed = k->slice({{0, seq_len - recentWindow, seq_len}});
+                auto v_compressed = v->slice({{0, seq_len - recentWindow, seq_len}});
+                //存入kv cache
+                RUN_INFINI(infiniopRearrange( // concat
+                        desc_kv_rearranges[req],
+                        kv_caches[req]->k[idev][layer]->data(past_len * nkvh * dh),
+                        k_compressed->data(), stream));
+
+                RUN_INFINI(infiniopRearrange(
+                        desc_kv_rearranges[req],
+                        kv_caches[req]->v[idev][layer]->data(past_len * nkvh * dh),
+                        v_compressed->data(), stream));
+                // qk
+                RUN_INFINI(infiniopRearrange(desc_q_rearranges[req], rearrange_q_buf->data(), q->data(), stream));
+                RUN_INFINI(infiniopGemm(
+                        desc_qk_gemms[req], workspace, workspace_size,
+                        qk_buf->data(), rearrange_q_buf->data(), k->data(), 1. / sqrt(dh), 0.0, stream));
+                // softmax
+                RUN_INFINI(infiniopCausalSoftmax(
+                        desc_qk_softmaxs[req], workspace, workspace_size,
+                        qk_buf->data(), qk_buf->data(), stream));
+                // attn val
+                RUN_INFINI(infiniopGemm(
+                        desc_attn_v_gemms[req], workspace, workspace_size,
+                        attn_val_buf->data(), qk_buf->data(), v->data(), 1.0, 0.0, stream));
+            } else { // decode phase
+                RUN_INFINI(infiniopRearrange(
+                        desc_kv_rearranges[req],
+                        kv_caches[req]->k[idev][layer]->data(past_len * nkvh * dh),
+                        k->data(), stream)); //加进kv cache
+
+                RUN_INFINI(infiniopRearrange(
+                        desc_kv_rearranges[req],
+                        kv_caches[req]->v[idev][layer]->data(past_len * nkvh * dh),
+                        v->data(), stream));
+                // qk
+                RUN_INFINI(infiniopRearrange(desc_q_rearranges[req], rearrange_q_buf->data(), q->data(), stream));
+                RUN_INFINI(infiniopGemm(
+                        desc_qk_gemms[req], workspace, workspace_size,
+                        qk_buf->data(), rearrange_q_buf->data(), kv_caches[req]->k[idev][layer]->data(), 1. / sqrt(dh), 0.0, stream));
+                // softmax
+                RUN_INFINI(infiniopCausalSoftmax(
+                        desc_qk_softmaxs[req], workspace, workspace_size,
+                        qk_buf->data(), qk_buf->data(), stream));
+                // attn val
+                RUN_INFINI(infiniopGemm(
+                        desc_attn_v_gemms[req], workspace, workspace_size,
+                        attn_val_buf->data(), qk_buf->data(), kv_caches[req]->v[idev][layer]->data(), 1.0, 0.0, stream));
+            }
+
             // rearrange attn val
             RUN_INFINI(infiniopRearrange(
                 desc_attn_v_rearranges[req],
@@ -543,7 +596,7 @@ void launchDevice(const JiugeMeta &meta, const JiugeWeights *weights, DeviceReso
     // Infer Loop
     while (true) {
         std::unique_lock<std::mutex> lock(state.mtx);
-        state.cv_start.wait(lock, [&] { return state.proceed || state.exit_flag; });
+        state.cv_start.wait(lock, [&] { return state.proceed || state.exit_flag; }); //等待inferBatch函数唤醒
         // quit if exit_flag is set
         if (state.exit_flag) {
             break;

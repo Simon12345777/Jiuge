@@ -11,7 +11,7 @@
 class Storage {
 private:
     Storage() = default;
-    void *_memory;
+    void *_memory; //储存首地址
     size_t _size;
     infiniDevice_t _device_type;
     int _device_id;
@@ -45,7 +45,7 @@ template <typename... Args>
 std::vector<ptrdiff_t> __strides(Args... args) {
     return std::vector<ptrdiff_t>{static_cast<ptrdiff_t>(args)...};
 }
-class TensorDesc {
+class TensorDesc { //Tensor的基本信息，包含形状、步长、数据类型
 private:
     infiniDtype_t _dtype;
     std::vector<size_t> _shape;

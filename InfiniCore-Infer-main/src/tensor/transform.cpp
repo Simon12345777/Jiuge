@@ -19,7 +19,7 @@ std::shared_ptr<Tensor> Tensor::sliceImpl(const std::vector<SliceParams> &slices
 
     tensor->_desc = TensorDesc::create(this->dtype(), new_shape, this->strides());
     tensor->_offset = offset * dsize(this->dtype()) + this->_offset;
-    tensor->_storage = this->_storage;
+    tensor->_storage = this->_storage; //共享原有tensor，没有单独创建新的空间
     return tensor;
 }
 

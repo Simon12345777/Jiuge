@@ -177,7 +177,7 @@ std::shared_ptr<Tensor> Tensor::memShare(const std::vector<size_t> &shape, infin
 }
 
 void *Tensor::dataImpl(ptrdiff_t offset) const {
-    return (char *)(this->_storage->memory()) + this->_offset + offset * dsize(this->dtype());
+    return (char *)(this->_storage->memory()) + this->_offset + offset * dsize(this->dtype()); //从this.offset的位置取出（即slice起效原理）
 }
 
 void *Tensor::data(ptrdiff_t offset) {

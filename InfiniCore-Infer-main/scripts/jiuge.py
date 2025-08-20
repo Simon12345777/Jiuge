@@ -75,8 +75,8 @@ class LlamaWeightsNaming:
 
     def match(state_dict):
         return (
-            "model.norm.weight" in state_dict
-            and "model.layers.0.self_attn.q_proj.weight" in state_dict
+                "model.norm.weight" in state_dict
+                and "model.layers.0.self_attn.q_proj.weight" in state_dict
         )
 
 
@@ -96,10 +96,10 @@ class JiugeMetaFromLlama(JiugeMetaCStruct):
         self.scale_o = 1.0
         self.scale_down = 1.0
         if (
-            "fm9g" == config["model_type"]
-            and "scale_emb" in config
-            and "scale_depth" in config
-            and "dim_model_base" in config
+                "fm9g" == config["model_type"]
+                and "scale_emb" in config
+                and "scale_depth" in config
+                and "dim_model_base" in config
         ):
             self.scale_input = config["scale_emb"]
             self.scale_output = config["hidden_size"] // config["dim_model_base"]
@@ -135,14 +135,14 @@ class JiugeMetaFromLlama(JiugeMetaCStruct):
 
 class JiugeWeightsImpl(JiugeWeightsCStruct):
     def __init__(
-        self,
-        meta,
-        naming,
-        state_dict,
-        torch_dt_mat=torch.float16,
-        torch_dt_norm=torch.float32,
-        ndev=1,
-        transpose_weight=True,
+            self,
+            meta,
+            naming,
+            state_dict,
+            torch_dt_mat=torch.float16,
+            torch_dt_norm=torch.float32,
+            ndev=1,
+            transpose_weight=True,
     ):
         nlayer = meta.nlayer
         nh = meta.nh
@@ -189,11 +189,11 @@ class JiugeWeightsImpl(JiugeWeightsCStruct):
         self.transpose_linear_weights = 1 if transpose_weight else 0
         self.nlayer = nlayer
         self.input_embd_tensor = (
-            state_dict[input_embd_naming].to(torch_dt_logits) * scale_input
+                state_dict[input_embd_naming].to(torch_dt_logits) * scale_input
         )
         self.input_embd = self.input_embd_tensor.data_ptr()
         self.output_norm_tensor = (
-            state_dict[naming.output_norm()].to(torch_dt_norm) * scale_output
+                state_dict[naming.output_norm()].to(torch_dt_norm) * scale_output
         )
         self.output_norm = self.output_norm_tensor.data_ptr()
         self.output_embd_tensor = state_dict[output_embd_naming].to(torch_dt_mat)
@@ -227,9 +227,9 @@ class JiugeWeightsImpl(JiugeWeightsCStruct):
             _nh = nh // ndev
             _nkvh = nkvh // ndev
             for _idev in range(ndev):
-                _result.append(_Q[_idev * _nh : (_idev + 1) * _nh, :, :, :])
-                _result.append(_K[_idev * _nkvh : (_idev + 1) * _nkvh, :, :, :])
-                _result.append(_V[_idev * _nkvh : (_idev + 1) * _nkvh, :, :])
+                _result.append(_Q[_idev * _nh: (_idev + 1) * _nh, :, :, :])
+                _result.append(_K[_idev * _nkvh: (_idev + 1) * _nkvh, :, :, :])
+                _result.append(_V[_idev * _nkvh: (_idev + 1) * _nkvh, :, :])
             return _result
 
         self.qkv_tensor = [
@@ -262,9 +262,9 @@ class JiugeWeightsImpl(JiugeWeightsCStruct):
             _nh = nh // ndev
             _nkvh = nkvh // ndev
             for _idev in range(ndev):
-                _result.append(_QB[_idev * _nh : (_idev + 1) * _nh, :, :].flatten())
-                _result.append(_KB[_idev * _nkvh : (_idev + 1) * _nkvh, :, :].flatten())
-                _result.append(_VB[_idev * _nkvh : (_idev + 1) * _nkvh, :, :].flatten())
+                _result.append(_QB[_idev * _nh: (_idev + 1) * _nh, :, :].flatten())
+                _result.append(_KB[_idev * _nkvh: (_idev + 1) * _nkvh, :, :].flatten())
+                _result.append(_VB[_idev * _nkvh: (_idev + 1) * _nkvh, :, :].flatten())
             return _result
 
         if naming.attn_q_b(0) in state_dict:
@@ -364,7 +364,7 @@ class JiugeBatchedTask:
         self.topps_list = [t.topp for t in tasks]
 
         # Flatten token lists
-        flat_tokens = [tok for toks in token_lists for tok in toks]
+        flat_tokens = [tok for toks in token_lists for tok in toks]  # 不同req(即task)的tokens拼接在一起
         self.ntok = len(flat_tokens)
 
         # Convert to ctypes arrays in one pass
@@ -392,7 +392,7 @@ class JiugeBatchedTask:
 
 class JiugeForCauslLM:
     def __init__(
-        self, model_dir_path, device=DeviceType.DEVICE_TYPE_CPU, ndev=1, max_tokens=None
+            self, model_dir_path, device=DeviceType.DEVICE_TYPE_CPU, ndev=1, max_tokens=None
     ):
         def load_all_safetensors_from_dir(dir_path_: str):
             tensors_ = {}
@@ -414,7 +414,7 @@ class JiugeForCauslLM:
             [eos_token_id] if type(eos_token_id) == int else eos_token_id
         )
         transpose_weight = (
-            device != DeviceType.DEVICE_TYPE_ASCEND
+                device != DeviceType.DEVICE_TYPE_ASCEND
         )  # y = xW is faster than y=xW^T on Ascend
         if "llama" == config["model_type"]:
             model = (
@@ -433,7 +433,7 @@ class JiugeForCauslLM:
             )
         elif "fm9g" == config["model_type"]:
             if any(
-                file.suffix == ".safetensors" for file in Path(model_dir_path).iterdir()
+                    file.suffix == ".safetensors" for file in Path(model_dir_path).iterdir()
             ):
                 state_dict = load_all_safetensors_from_dir(model_dir_path)
             else:
@@ -458,7 +458,7 @@ class JiugeForCauslLM:
                 raise ValueError("Unsupported weight naming")
         elif "fm9g7b" == config["model_type"]:
             if any(
-                file.suffix == ".safetensors" for file in Path(model_dir_path).iterdir()
+                    file.suffix == ".safetensors" for file in Path(model_dir_path).iterdir()
             ):
                 state_dict = load_all_safetensors_from_dir(model_dir_path)
             else:
@@ -523,9 +523,9 @@ class JiugeForCauslLM:
     def drop_kv_cache(self, kv_cache):
         drop_kv_cache(self.model_instance, kv_cache)
 
-    def batch_infer_one_round(self, tasks: List[InferTask]): ## 单步推理
+    def batch_infer_one_round(self, tasks: List[InferTask]):  ## 单步推理
         output = (c_uint * len(tasks))()
-        batch_inputs = JiugeBatchedTask(tasks)
+        batch_inputs = JiugeBatchedTask(tasks)  # 准备推理的参数
         infer_batch(
             self.model_instance,
             *(batch_inputs.input_args()),
@@ -533,7 +533,7 @@ class JiugeForCauslLM:
         )
         return list(output)
 
-    def generate(self, input_content, max_steps, topp_=1.0, topk_=1, temperature_=1.0):
+    def generate(self, input_content, max_steps, topp_=1.0, topk_=1, temperature_=1.0): # 单实例推理(一个req)
         input_content = self.tokenizer.apply_chat_template(
             conversation=[{"role": "user", "content": input_content}],
             add_generation_prompt=True,
@@ -558,7 +558,7 @@ class JiugeForCauslLM:
 
         for step_i in range(max_steps):
             start_time = time.time()
-            output_tokens = self.batch_infer_one_round([infer_task])
+            output_tokens = self.batch_infer_one_round([infer_task])  # 单步推理
             end_time = time.time()
             steps += 1
             output_str = (
@@ -570,13 +570,13 @@ class JiugeForCauslLM:
             print(output_str, end="", flush=True)
             if output_tokens[0] in self.eos_token_id:
                 break
-            infer_task.next(output_tokens[0])
+            infer_task.next(output_tokens[0])  # infer_task换成新生成的token，并更新kv cache的pos
 
             if step_i > 0:
                 total_time += end_time - start_time
 
         print("\n")
-        avg_time = total_time * 1000 / (steps - 1)
+        avg_time = total_time * 1000 / (steps - 1)  # decode阶段的时间
         print(f"Time per step: {avg_time:.3f}ms")
 
         infer_task._kv_cache.drop(self)
@@ -617,7 +617,7 @@ def test():
 
     ndev = int(sys.argv[3]) if len(sys.argv) > 3 else 1
     model = JiugeForCauslLM(model_path, device_type, ndev)
-    model.generate("山东最高的山是？", 500)
+    model.generate("山东最高的山是？", 51)
     model.destroy_model_instance()
 
 
