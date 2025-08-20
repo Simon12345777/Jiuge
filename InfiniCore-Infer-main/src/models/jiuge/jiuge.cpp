@@ -219,6 +219,9 @@ void inferDeviceBatch(const JiugeMeta &meta, DeviceResource &rsrc,
     size_t max_qk_size = 0;
     size_t max_seq_len = 0;
     o_buf->dimSplit(1, {nh, dh});
+
+    size_t recentWindow = 16; //streamingLLM
+
     for (uint32_t req = 0; req < nreq; req++) {
         auto past_len = req_pos[req];
         auto seq_len = req_lens[req];
@@ -231,9 +234,9 @@ void inferDeviceBatch(const JiugeMeta &meta, DeviceResource &rsrc,
         // [nkvh, dh, total_len]
         auto full_kv = kv_caches[req]->k[idev][0]->slice(0, 0, total_len)->permute({1, 2, 0});
         auto cache_kv = kv_caches[req]->k[idev][0]->slice(0, past_len, seq_len);
-        size_t recentWindow = 16;
+
         if (past_len == 0) {
-            auto k_compressed = k->slice({0, seq_len - recentWindow, seq_len});
+            auto k_compressed = k->slice({{0, seq_len - recentWindow, recentWindow}});
             RUN_INFINI(infiniopCreateRearrangeDescriptor(rsrc.handle, &desc_kv_rearranges[req],
                                                          cache_kv->desc(), k_compressed->desc()));
         } else {
@@ -376,7 +379,6 @@ void inferDeviceBatch(const JiugeMeta &meta, DeviceResource &rsrc,
             stream));
 
         size_t token_offset = 0;
-        size_t recentWindow = 16;/////streamingLLM
         for (uint32_t req = 0; req < nreq; req++) {
             auto past_len = req_pos[req]; //for kv cache
             auto seq_len = req_lens[req];
@@ -387,8 +389,8 @@ void inferDeviceBatch(const JiugeMeta &meta, DeviceResource &rsrc,
             //不同req的qkv存在一起,用token_offset来维护
             // self attention
             if (past_len == 0) { // first prefill phase
-                auto k_compressed = k->slice({{0, seq_len - recentWindow, seq_len}});
-                auto v_compressed = v->slice({{0, seq_len - recentWindow, seq_len}});
+                auto k_compressed = k->slice({{0, seq_len - recentWindow, recentWindow}});
+                auto v_compressed = v->slice({{0, seq_len - recentWindow, recentWindow}});
                 //存入kv cache
                 RUN_INFINI(infiniopRearrange( // concat
                         desc_kv_rearranges[req],
