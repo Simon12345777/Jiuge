@@ -264,7 +264,7 @@ void inferDeviceBatch(const JiugeMeta &meta, DeviceResource &rsrc,
 
         if (past_len == 0) {
             RUN_INFINI(infiniopCreateGemmDescriptor(
-                    rsrc.handle, &desc_qk_gemms[req], qk->desc(), q_t->desc(), k->permute({1, 2, 0})->desc()));
+                    rsrc.handle, &desc_qk_gemms[req], qk->desc(), q_t->desc(), (k->permute({1, 2, 0}))->desc()));
         } else {
             RUN_INFINI(infiniopCreateGemmDescriptor(
                     rsrc.handle, &desc_qk_gemms[req], qk->desc(), q_t->desc(), full_kv->desc()));
@@ -279,7 +279,7 @@ void inferDeviceBatch(const JiugeMeta &meta, DeviceResource &rsrc,
 
         if (past_len == 0) {
             RUN_INFINI(infiniopCreateGemmDescriptor(
-                    rsrc.handle, &desc_attn_v_gemms[req], q_t->desc(), qk->desc(), v->permute({1, 0, 2})->desc()));
+                    rsrc.handle, &desc_attn_v_gemms[req], q_t->desc(), qk->desc(), (v->permute({1, 0, 2}))->desc()));
         } else {
             RUN_INFINI(infiniopCreateGemmDescriptor(
                     rsrc.handle, &desc_attn_v_gemms[req], q_t->desc(), qk->desc(), full_v->desc()));
