@@ -112,7 +112,7 @@ void releaseDeviceResource(DeviceResource &res) {
 
 void inferDeviceBatch(const JiugeMeta &meta, DeviceResource &rsrc,
                       uint32_t idev, uint32_t ndev,
-                      const uint32_t *tokens, uint32_t ntok,
+                      const uint32_t *tokens, uint32_t ntok, //所有req的ntokens之和
                       const uint32_t *req_lens, uint32_t nreq, const uint32_t *req_pos,
                       struct KVCache **kv_caches,
                       const float *temperature, const uint32_t *topk, const float *topp,
@@ -220,8 +220,7 @@ void inferDeviceBatch(const JiugeMeta &meta, DeviceResource &rsrc,
     size_t max_seq_len = 0;
     o_buf->dimSplit(1, {nh, dh});
 
-    size_t recentWindow = 16; //streamingLLM
-
+    size_t recentWindow = 16; //sparse attention
     for (uint32_t req = 0; req < nreq; req++) {
         auto past_len = req_pos[req];
         auto seq_len = req_lens[req];
@@ -235,7 +234,9 @@ void inferDeviceBatch(const JiugeMeta &meta, DeviceResource &rsrc,
         auto full_kv = kv_caches[req]->k[idev][0]->slice(0, 0, total_len)->permute({1, 2, 0});
         auto cache_kv = kv_caches[req]->k[idev][0]->slice(0, past_len, seq_len);
 
-        if (past_len == 0) {
+        bool prune = (past_len == 0) && (seq_len > recentWindow);
+
+        if (prune) {
             auto k_compressed = k->slice({{0, seq_len - recentWindow, recentWindow}});
             auto cache_kv_compressed = kv_caches[req]->k[idev][0]->slice(0, past_len, recentWindow);
             RUN_INFINI(infiniopCreateRearrangeDescriptor(rsrc.handle, &desc_kv_rearranges[req],
@@ -262,7 +263,7 @@ void inferDeviceBatch(const JiugeMeta &meta, DeviceResource &rsrc,
         max_qk_size = std::max(max_qk_size, size_t(seq_len * total_len));
         max_seq_len = std::max(max_seq_len, size_t(seq_len));
 
-        if (past_len == 0) {
+        if (prune) {
             RUN_INFINI(infiniopCreateGemmDescriptor(
                     rsrc.handle, &desc_qk_gemms[req], qk->desc(), q_t->desc(), (k->permute({1, 2, 0}))->desc()));
         } else {
@@ -277,7 +278,7 @@ void inferDeviceBatch(const JiugeMeta &meta, DeviceResource &rsrc,
         // [nkvh, total_len, dh]
         auto full_v = kv_caches[req]->v[idev][0]->slice(0, 0, total_len)->permute({1, 0, 2});
 
-        if (past_len == 0) {
+        if (prune) {
             RUN_INFINI(infiniopCreateGemmDescriptor(
                     rsrc.handle, &desc_attn_v_gemms[req], q_t->desc(), qk->desc(), (v->permute({1, 0, 2}))->desc()));
         } else {
@@ -388,8 +389,9 @@ void inferDeviceBatch(const JiugeMeta &meta, DeviceResource &rsrc,
             auto k = qkv_buf->slice({{0, token_offset, seq_len}, {1, nh, nkvh}});
             auto v = qkv_buf->slice({{0, token_offset, seq_len}, {1, nh + nkvh, nkvh}}); //同一个req的qkv本身也储存在一起，arg2=起始位置，arg3=大小
             //不同req的qkv存在一起,用token_offset来维护
+            bool prune = (past_len == 0) && (seq_len > recentWindow);
             // self attention
-            if (past_len == 0) { // first prefill phase
+            if (prune) { // first prefill phase
                 auto k_compressed = k->slice({{0, seq_len - recentWindow, recentWindow}});
                 auto v_compressed = v->slice({{0, seq_len - recentWindow, recentWindow}});
                 //存入kv cache
